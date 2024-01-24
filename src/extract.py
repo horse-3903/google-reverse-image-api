@@ -1,11 +1,17 @@
 import asyncio
 import aiofiles
+
 from datetime import datetime
+
+from pathlib import Path
+
 from playwright.async_api import async_playwright, Playwright
+
+playwright: Playwright
 
 async def run():
     global playwright, chromium, browser, context, page
-    playwright: Playwright = async_playwright()
+    playwright = await async_playwright().start()
 
     # navigate to imghp page
     chromium = playwright.chromium
@@ -22,6 +28,8 @@ async def close():
     await playwright.stop()
 
 async def search_url(url: str, num: int):
+    await run()
+
     # search with link
     await page.get_by_role("button", name="Search by image").click()
     url_input = page.get_by_placeholder("Paste image link")
@@ -38,9 +46,13 @@ async def search_url(url: str, num: int):
 
     content = await page.locator(".pFjtkf").inner_html()
 
-    async with aiofiles.open(f"./content/content-{datetime.now().strftime('%d%m%Y-%H%M%S')}.html", "w+", encoding="utf-8") as f:
+    path = Path(f"./content/content-{datetime.now().strftime('%d%m%Y-%H%M%S')}.html")
+    
+    async with aiofiles.open(path, "w+", encoding="utf-8") as f:
         await f.write(content)
     
     await close()
 
-asyncio.run(run())
+    return path
+
+asyncio.run(search_url("https://static.wikia.nocookie.net/amogus/images/c/cb/Susremaster.png/revision/latest?cb=20210806124552", 10))
