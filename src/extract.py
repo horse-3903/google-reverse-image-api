@@ -4,8 +4,10 @@ import aiofiles
 from datetime import datetime
 
 from pathlib import Path
+import json
 
 from playwright.async_api import async_playwright, Playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 playwright: Playwright
 
@@ -55,4 +57,43 @@ async def search_url(url: str, num: int):
 
     return path
 
-asyncio.run(search_url("https://static.wikia.nocookie.net/amogus/images/c/cb/Susremaster.png/revision/latest?cb=20210806124552", 10))
+async def search_query(q: str, num: int):
+    await run()
+
+    # search with link
+    query_input = page.get_by_role("combobox", name="Search")
+    await query_input.hover()
+    await query_input.type(q)
+    await query_input.press("Enter")
+
+    await page.wait_for_load_state("networkidle")
+
+    main_image_div = list(await page.locator(".islrc > div").all())
+    extra_image_div = []
+    
+    while len(main_image_div + extra_image_div) - 20 < num:
+        try:
+            await page.locator(".w9dUj").inner_html(timeout=1000)
+            
+            for _ in range(2):
+                await (main_image_div + extra_image_div)[-1].hover()
+                extra_image_div = list(await page.locator(".islrc > .isnpr > div").all())
+
+            break
+
+        except PlaywrightTimeoutError:
+            pass
+
+        await (main_image_div + extra_image_div)[-1].hover()
+        extra_image_div = list(await page.locator(".islrc > .isnpr > div").all())
+
+    path = Path(f"./data/test-data-{datetime.now().strftime('%d%m%Y-%H%M%S')}.txt")
+    
+    async with aiofiles.open(path, "w+", encoding="utf-8") as f:
+        await f.write(json.dumps([await i.inner_html() for i in (main_image_div + extra_image_div)], indent=4))
+
+    await asyncio.sleep(5)
+    await close()
+
+# asyncio.run(search_url("https://static.wikia.nocookie.net/amogus/images/c/cb/Susremaster.png/revision/latest?cb=20210806124552", 10))
+asyncio.run(search_query("amogus", 10000))

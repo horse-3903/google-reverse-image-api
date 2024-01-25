@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup, Tag
 
 cal = parsedatetime.Calendar()
 
-def parse_lens(file: Path, save: bool = False):
+def parse_lens(file: Path, save: bool = False, hd: bool = False):
     content = ""
     res = []
 
@@ -34,6 +34,9 @@ def parse_lens(file: Path, save: bool = False):
         data["size"] = list(map(int, misc_val[1].split("x"))) # size of image
 
         res.append(data)
+
+    if hd:
+        pass
     
     if save:
         path = Path(f"./data/data-{datetime.now().strftime('%d%m%Y-%H%M%S')}.json")
@@ -44,5 +47,8 @@ def parse_lens(file: Path, save: bool = False):
         return res, path
 
     return res, None
+
+def parse_search(file: Path, save: bool = False, hd: bool = False):
+    pass
 
 print(parse_lens(file=Path("./content/content-23012024-215505.html"), save=True))
