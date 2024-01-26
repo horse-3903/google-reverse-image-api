@@ -73,27 +73,37 @@ async def search_query(q: str, num: int):
     
     while len(main_image_div + extra_image_div) - 20 < num:
         try:
-            await page.locator(".w9dUj").inner_html(timeout=1000)
-            
-            for _ in range(2):
-                await (main_image_div + extra_image_div)[-1].hover()
-                extra_image_div = list(await page.locator(".islrc > .isnpr > div").all())
-
-            break
-
+            await page.get_by_text("Show more results").click(timeout=1000)
         except PlaywrightTimeoutError:
-            pass
+            try:
+                await page.get_by_text("See more anyway").click(timeout=1000)
+            except PlaywrightTimeoutError:
+                if len(await page.get_by_text("Looks like you've reached the end").all()) > 2:
+                    for div in await page.get_by_text("Looks like you've reached the end").all():
+                        try:
+                            await div.hover(timeout=1000)
+                        except:
+                            pass
+
+                    extra_image_div = list(await page.locator(".islrc > .isnpr > div").all())
+                    break
 
         await (main_image_div + extra_image_div)[-1].hover()
         extra_image_div = list(await page.locator(".islrc > .isnpr > div").all())
 
-    path = Path(f"./data/test-data-{datetime.now().strftime('%d%m%Y-%H%M%S')}.txt")
-    
-    async with aiofiles.open(path, "w+", encoding="utf-8") as f:
-        await f.write(json.dumps([await i.inner_html() for i in (main_image_div + extra_image_div)], indent=4))
+    image_div = main_image_div + extra_image_div
 
-    await asyncio.sleep(5)
+    for div in image_div:
+        await div.click()
+
+
+    # path = Path(f"./data/test-data-{datetime.now().strftime('%d%m%Y-%H%M%S')}.json")
+    
+    # async with aiofiles.open(path, "w+", encoding="utf-8") as f:
+    #     await f.write(json.dumps([await i.inner_html() for i in image_div], indent=4))
+
+    await asyncio.sleep(1000)
     await close()
 
 # asyncio.run(search_url("https://static.wikia.nocookie.net/amogus/images/c/cb/Susremaster.png/revision/latest?cb=20210806124552", 10))
-asyncio.run(search_query("amogus", 10000))
+asyncio.run(search_query("dogs", 10000))
