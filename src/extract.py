@@ -6,9 +6,9 @@ from datetime import datetime
 from pathlib import Path
 import json
 
-import tempfile
-
 from tqdm import tqdm
+
+from util import create_tmp
 
 from playwright.async_api import async_playwright, Playwright
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -18,9 +18,10 @@ playwright: Playwright
 async def run():
     global playwright, chromium, browser, context, page
 
-    ## add print info thing
+    print("INFO: Starting Playwright Client")
     playwright = await async_playwright().start()
 
+    print("INFO: Navigating to Google Images")
     # navigate to imghp page
     chromium = playwright.chromium
     browser = await chromium.launch(headless=False)
@@ -30,17 +31,17 @@ async def run():
     await page.goto("https://www.google.com/imghp?hl=en")
 
 async def close():
-    ## add print info thing
+    print("INFO: Closing Playwright Client")
     await page.close()
     await context.close()
     await browser.close()
     await playwright.stop()
 
-async def search_url(url: str, num: int):
+async def search_url(url: str, num: int) -> Path:
     await run()
 
     # search with link
-    ## add print info thing
+    print("INFO: Searching by Image")
     await page.get_by_role("button", name="Search by image").click()
     url_input = page.get_by_placeholder("Paste image link")
     await url_input.hover()
@@ -51,13 +52,13 @@ async def search_url(url: str, num: int):
 
     await page.wait_for_load_state("networkidle")
 
-    ## add print info thing
+    print("INFO: Loading images")
     while len(await page.locator(".anSuc").all()) < num:
         await page.locator(".dg5SXe").locator("button").click()
 
     content = await page.locator(".pFjtkf").inner_html()
 
-    ## add print info thing
+    print("INFO: Saving HTML Content")
     path = Path(f"./content/content-{datetime.now().strftime('%d%m%Y-%H%M%S')}.html")
     
     async with aiofiles.open(path, "w+", encoding="utf-8") as f:
@@ -71,7 +72,7 @@ async def search_query(q: str, num: int):
     await run()
 
     # search with link
-    ## add print info thing
+    print("INFO: Searching by Query")
     query_input = page.get_by_role("combobox", name="Search")
     await query_input.hover()
     await query_input.type(q)
@@ -83,7 +84,7 @@ async def search_query(q: str, num: int):
     extra_image_div = []
     
     # load images
-    ## add print info thing
+    print("INFO: Loading images")
     while len(main_image_div + extra_image_div) - 20 < num:
         try:
             await page.get_by_text("Show more results").click(timeout=1000)
@@ -110,15 +111,19 @@ async def search_query(q: str, num: int):
         image_div = image_div[:num]
     
     content = []
+    
+    active_file = create_tmp()
 
     ## add print info thing
     # collect high-res
-    for div in tqdm(image_div, desc="Photos Scraped", unit="images"):
+    for div in tqdm(image_div, desc="Photos Scraped", unit=" images"):
         if "Related searches" not in (await div.inner_text()):
             await div.click()
-            await asyncio.sleep(0.3)
-            # not extracting img
-            content.append(await page.locator("#Sva75c").inner_html())
+            await asyncio.sleep(0.5)
+            
+            info = await page.locator("#Sva75c").locator("..")
+
+
     
     ## add print info thing
     path = Path(f"./data/test-data-{datetime.now().strftime('%d%m%Y-%H%M%S')}.json")
@@ -131,4 +136,4 @@ async def search_query(q: str, num: int):
     await close()
 
 # asyncio.run(search_url("https://static.wikia.nocookie.net/amogus/images/c/cb/Susremaster.png/revision/latest?cb=20210806124552", 10))
-asyncio.run(search_query("dogs", 500))
+asyncio.run(search_query("dogs", 100))
