@@ -7,14 +7,18 @@ from local_util import *
 
 from playwright.async_api import async_playwright
 
+import json
+
 class GoogleReverseSearch:
-    def __init__(self, debug: bool = False, trace_file: bool = None):
+    def __init__(self, debug: bool = False, trace_file: str = None):
         self.debug = debug
         
         if debug and trace_file:
             self.trace_file = trace_file
         elif debug and not trace_file:
             self.trace_file = "trace.zip"
+        else:
+            self.trace_file = None
         
         self.active = False
         self.url = "https://www.google.com/imghp?hl=en"
@@ -46,35 +50,34 @@ class GoogleReverseSearch:
         await self.browser.close()
         await self.playwright.stop()
 
-        subprocess.run(["playwright", "show-trace", self.trace_file])
+        if self.debug and self.trace_file:
+            subprocess.run(args=["playwright", "show-trace", self.trace_file])
 
-    async def search_query(self, query: str, num: int = None):
+    async def search_query(self, query: str, num: int = 1):
         await self.__start__()
 
         with SendMessage(f"Searching '{query}'..."):
             search_bar = self.page.locator("textarea").first
             await search_bar.fill(query)
 
-            search_button = self.page.locator("button[type=submit]")
-            await search_button.click()
+            await search_bar.press("Enter")
 
             await self.page.wait_for_load_state("load")
 
-        search_results = self.page.locator(f"div[data-q='{query}'] > div > div")
-        search_results = await search_results.all()
+        # search_results = self.page.locator(f"div[data-q='{query}'] > div > div")
+        # search_results = await search_results.all()
 
-        filtered_search_results = []
+        # filtered_search_results = []
 
-        for div in search_results:
-            if "Related searches" not in (await div.inner_text()):
-                filtered_search_results.append(div)
+        # for div in search_results:
+        #     if "Related searches" not in (await div.inner_text()):
+        #         filtered_search_results.append(div)
 
-        search_results = filtered_search_results
+        search_results = []
 
         while len(search_results) < num:
             with SendMessage("Scrolling..."):
                 await self.page.keyboard.press("End")
-                await asyncio.sleep(3)
 
                 search_results = self.page.locator(f"div[data-q='{query}'] > div > div")
                 search_results = await search_results.all()
@@ -86,7 +89,7 @@ class GoogleReverseSearch:
                     if "Related searches" not in (await div.inner_text()):
                         filtered_search_results.append(div)
 
-                search_results = filtered_search_results
+                search_results.extend(filtered_search_results)
 
         links = []
 
@@ -100,8 +103,10 @@ class GoogleReverseSearch:
                 await div.click()
                 await self.page.wait_for_selector(f"div[role=dialog][data-query='{query}']")
 
-                image = self.page.locator(f"div[role=dialog][data-query='{query}']").locator("a > img[aria-hidden=false]")
-                links.append(await image.get_attribute("src", timeout=500))
+                image_lst = await self.page.locator(f"div[role=dialog][data-query='{query}']").locator("a > img").all()
+                image_link_lst = [await image.get_attribute("src", timeout=500) for image in image_lst]
+                image_link_lst = [link for link in image_link_lst if link and not link.startswith("https://encrypted-tbn0.gstatic.com/image") and not link.startswith("https://google.com/search")]
+                links.append(image_link_lst[0])
             except:
                 continue
 
@@ -112,6 +117,9 @@ class GoogleReverseSearch:
 async def main():   
     g = GoogleReverseSearch(debug=True)
 
-    print(await g.search_query(query="among us", num=10))
+    results = await g.search_query(query="laptop bottom case", num=100)
+
+    with open("data/data.json", "w+") as f:
+        json.dump(results, f)
 
 asyncio.run(main())
