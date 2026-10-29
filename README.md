@@ -2,12 +2,12 @@
 
 # google-reverse-image-api
 
-Async Google reverse image search via Playwright, served as a REST API with Celery task queuing
+Full-resolution Google Images URLs over Chrome remote debugging, served as a REST API with Celery task queuing
 
 [![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/python)
 [![License](https://img.shields.io/github/license/horse-3903/google-reverse-image-api?style=flat-square)](LICENSE)
 [![Last Commit](https://img.shields.io/github/last-commit/horse-3903/google-reverse-image-api?style=flat-square)](../../commits)
-[![Stars](https://img.shields.io/github/stars/horse-3903/google-reverse-image-api?style=flat-square)](../../stargazers)
 
 </div>
 
@@ -15,15 +15,19 @@ Async Google reverse image search via Playwright, served as a REST API with Cele
 
 ## Overview
 
-`google-reverse-image-api` is the maintained successor to `google-reverse-image-search-deprecated`. It wraps Google Images search in a headless Playwright browser, exposes the results through a Flask REST API, and offloads long-running searches to Celery workers backed by Redis. The async design handles pagination automatically until the requested number of results is collected.
+**google-reverse-image-api** returns the original, full-size image URLs for a Google Images search, along with their pixel dimensions. Google embeds these URLs in the result data of the search page and its scroll responses, so the scraper reads them directly instead of clicking every thumbnail. A real Chrome is attached over the DevTools protocol because Google serves an empty page to plain HTTP clients.
+
+---
 
 ## Features
 
-- **Headless browser scraping**: Playwright drives a real Chromium instance so no API key is needed
-- **Async search engine**: scrolls and paginates automatically to reach the requested result count
-- **Background task queue**: Celery + Redis decouple request handling from scraping latency
-- **Polling endpoint**: clients check task status and retrieve results when ready
-- **Local search utilities**: additional scripts for offline/local image search workflows
+- **No clicking** - full-size URLs and dimensions are parsed from the page data and scroll responses
+- **Real Chrome over CDP** - launches a dedicated profile, or attaches to your main Chrome
+- **All results mode** - `num=0` keeps scrolling until Google has nothing more to show
+- **Background task queue** - Celery + Redis decouple request handling from scraping latency
+- **Polling endpoint** - clients check task status and retrieve results when ready
+
+---
 
 ## Tech Stack
 
@@ -33,51 +37,66 @@ Async Google reverse image search via Playwright, served as a REST API with Cele
 [![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io)
 [![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)](https://playwright.dev/python)
 
+---
+
 ## Getting Started
 
 ### Prerequisites
 
 - Python 3.10+
-- Redis server running on `localhost:6379`
+- Google Chrome
+- Redis server running on `localhost:6379` (API mode only)
 
 ### Installation
 
 ```bash
 pip install -r requirements.txt
-playwright install chromium
 ```
 
-### Running the Server
-
-Start Redis, then launch a Celery worker and the Flask app in separate terminals:
+### Run from the command line
 
 ```bash
-# Terminal 1 — Celery worker
-celery -A api.api_util worker --loglevel=info
-
-# Terminal 2 — Flask API
-python api/app.py
+python api/api_util.py "golden retriever" --num 50 --out results.json
 ```
+
+The first run opens a Chrome window with its own profile (`~/.google-reverse-image-profile`). If Google shows a bot check, solve it in that window and rerun; the profile remembers it.
+
+### Run the API
+
+```bash
+# Terminal 1: Celery worker
+cd api && celery -A api_util worker --loglevel=info
+
+# Terminal 2: Flask API
+cd api && python app.py
+```
+
+### Run the tests
+
+```bash
+python -m unittest tests.test_extract
+```
+
+---
 
 ## API Reference
 
-### Submit a reverse image search
+### Submit a search
 
 ```
 GET /api-route/google-reverse-search/search-query?query=<query>&num=<count>
 ```
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `query`   | `str` | Search query or image URL |
-| `num`     | `int` | Number of results to retrieve |
+| Parameter | Type  | Description                                              |
+|-----------|-------|----------------------------------------------------------|
+| `query`   | `str` | Search query                                             |
+| `num`     | `int` | Number of results, default 10, `0` for every result      |
 
 **Response `202`:**
+
 ```json
 { "task_id": "abc123..." }
 ```
-
----
 
 ### Poll task status
 
@@ -85,20 +104,16 @@ GET /api-route/google-reverse-search/search-query?query=<query>&num=<count>
 GET /api-route/task-status/<task_id>
 ```
 
-**Response (pending):**
-```json
-{ "state": "PENDING", "status": "Pending..." }
-```
-
 **Response (success):**
+
 ```json
 {
   "state": "SUCCESS",
-  "result": ["https://...", "https://...", "..."]
+  "result": [
+    { "url": "https://oxfordlearning.com/.../types-of-test-takers.jpeg", "width": 1500, "height": 1000 }
+  ]
 }
 ```
-
----
 
 ### Using the `GoogleReverseSearch` class directly
 
@@ -106,13 +121,22 @@ GET /api-route/task-status/<task_id>
 import asyncio
 from api.api_util import GoogleReverseSearch
 
-async def main():
-    g = GoogleReverseSearch(debug=False)
-    links = await g.search_query(query="golden retriever", num=10)
-    print(links)
-
-asyncio.run(main())
+results = asyncio.run(GoogleReverseSearch().search_query("golden retriever", num=10))
 ```
+
+---
+
+## Chrome Connection
+
+| `CDP_ENDPOINT` | Behaviour |
+|----------------|-----------|
+| `launch` (default) | Starts Chrome with `--remote-debugging-port` and a dedicated profile, then attaches |
+| `auto` | Attaches to your main Chrome after you enable `chrome://inspect/#remote-debugging` and click Allow |
+| `http://...` or `ws://...` | Attaches to the given endpoint |
+
+Chrome 136+ ignores the debugging port on the default profile, which is why `launch` uses its own profile.
+
+---
 
 ## Project Structure
 
@@ -120,16 +144,26 @@ asyncio.run(main())
 google-reverse-image-api/
 ├── api/
 │   ├── app.py          # Flask application + route definitions
-│   └── api_util.py     # GoogleReverseSearch class + Celery task
-├── src/
-│   ├── search_api.py   # Additional API search utilities
-│   ├── search_local.py # Local/offline search helpers
-│   └── local_util.py   # Shared local utilities
-├── data/               # Sample data (not committed)
-├── test/               # Test scripts
+│   └── api_util.py     # Chrome launcher, result parser, GoogleReverseSearch, Celery task, CLI
+├── tests/
+│   └── test_extract.py # Parser tests for the page and scroll response formats
 └── requirements.txt
 ```
 
+---
+
+## Environment Variables
+
+| Variable         | Default                           | Description                                   |
+|------------------|-----------------------------------|-----------------------------------------------|
+| `REDIS_URL`      | `redis://localhost:6379/0`        | Celery broker and result backend              |
+| `CDP_ENDPOINT`   | `launch`                          | `launch`, `auto`, or a CDP http/ws endpoint   |
+| `CDP_PORT`       | `9333`                            | Debugging port for the launched Chrome        |
+| `CHROME_PROFILE` | `~/.google-reverse-image-profile` | User data directory for the launched Chrome   |
+| `CHROME_PATH`    | auto-detected                     | Path to the Chrome executable                 |
+
+---
+
 ## License
 
-MIT: see [LICENSE](LICENSE)
+MIT, see [LICENSE](LICENSE)

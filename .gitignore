@@ -162,7 +162,5 @@ cython_debug/
 content/*
 !content/content.html
 
-data/*
-!data/data.json
 
 trace.zip

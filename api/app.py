@@ -1,17 +1,7 @@
-import asyncio
 from flask import Flask, jsonify, request
 from api_util import google_reverse_search_task
-from celery import Celery
 
 app = Flask(__name__)
-
-# Configure Celery to use Redis as the message broker
-app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
-app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
-
-# Initialize Celery
-celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
-celery.conf.update(app.config)
 
 @app.route("/")
 def index():
@@ -21,7 +11,14 @@ def index():
 @app.route("/api-route/google-reverse-search/search-query")
 def search_query():
     query = request.args.get("query")
-    num = int(request.args.get("num"))
+    if not query:
+        return jsonify({'error': 'query is required'}), 400
+    try:
+        num = int(request.args.get("num", 10))
+    except ValueError:
+        return jsonify({'error': 'num must be an integer'}), 400
+    if num < 0:
+        return jsonify({'error': 'num must be 0 (all results) or greater'}), 400
 
     # Call the background task
     task = google_reverse_search_task.apply_async(args=[query, num])
@@ -39,7 +36,7 @@ def get_task_status(task_id):
     elif task.state == 'SUCCESS':
         response = {'state': task.state, 'result': task.result}
     elif task.state == 'FAILURE':
-        response = {'state': task.state, 'status': 'Task failed.'}
+        response = {'state': task.state, 'status': 'Task failed.', 'error': str(task.result)}
     else:
         response = {'state': task.state, 'status': 'Task in progress...'}
     
