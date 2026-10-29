@@ -2,7 +2,7 @@
 
 # google-reverse-image-api
 
-Google Images scraper and REST API: original full-size image URLs and dimensions for any search, no API key, no clicking
+Google Images and reverse image search scraper with a REST API: original full-size image URLs, dimensions and source pages, no API key, no clicking
 
 [![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/python)
@@ -15,9 +15,7 @@ Google Images scraper and REST API: original full-size image URLs and dimensions
 
 ## Overview
 
-**google-reverse-image-api** is a Google Images scraper that returns the original, full-size image URLs for a text search, along with their pixel dimensions, as JSON. Google embeds these URLs in the result data of the search page and its scroll responses, so the scraper reads them directly instead of clicking every thumbnail. A real Chrome is attached over the DevTools protocol (CDP) because Google serves an empty page to plain HTTP clients.
-
-It searches Google Images by text query. It does not do upload-based reverse image search.
+**google-reverse-image-api** is a Google Images scraper that returns the original, full-size image URLs for a text search or a reverse image search (Google Lens), along with their pixel dimensions, source page and title, as JSON. Google embeds these URLs in the result data of the search page and its scroll responses, so the scraper reads them directly instead of clicking every thumbnail. A real Chrome is attached over the DevTools protocol (CDP) because Google serves an empty page to plain HTTP clients.
 
 ---
 
@@ -37,6 +35,7 @@ Measured once on the query "test": 400 results with dimensions in about 30 secon
 
 - **No clicking** - full-size URLs and dimensions are parsed from the page data and scroll responses
 - **Real Chrome over CDP** - launches a dedicated profile, or attaches to your main Chrome
+- **Reverse image search** - upload an image through Google Lens and get visual matches with their source pages
 - **All results mode** - `num=0` keeps scrolling until Google has nothing more to show
 - **Background task queue** - Celery + Redis decouple request handling from scraping latency
 - **Polling endpoint** - clients check task status and retrieve results when ready
@@ -71,6 +70,12 @@ pip install -r requirements.txt
 
 ```bash
 python api/api_util.py "golden retriever" --num 50 --out results.json
+```
+
+Reverse image search with a local image:
+
+```bash
+python api/api_util.py --image photo.jpg --num 0 --out matches.json
 ```
 
 The first run opens a Chrome window with its own profile (`~/.google-reverse-image-profile`). If Google shows a bot check, solve it in that window and rerun; the profile remembers it.
@@ -112,6 +117,14 @@ GET /api-route/google-reverse-search/search-query?query=<query>&num=<count>
 { "task_id": "abc123..." }
 ```
 
+### Submit a reverse image search
+
+```
+POST /api-route/google-reverse-search/search-image
+```
+
+Multipart form fields: `image` (the file) and optional `num` (default 10, `0` for every match). Returns the same `202` with a `task_id`.
+
 ### Poll task status
 
 ```
@@ -124,7 +137,13 @@ GET /api-route/task-status/<task_id>
 {
   "state": "SUCCESS",
   "result": [
-    { "url": "https://oxfordlearning.com/.../types-of-test-takers.jpeg", "width": 1500, "height": 1000 }
+    {
+      "url": "https://oxfordlearning.com/.../types-of-test-takers.jpeg",
+      "width": 1500,
+      "height": 1000,
+      "page_url": "https://oxfordlearning.com/common-types-of-test-takers/",
+      "title": "Common Types of Test Takers"
+    }
   ]
 }
 ```
@@ -135,7 +154,9 @@ GET /api-route/task-status/<task_id>
 import asyncio
 from api.api_util import GoogleReverseSearch
 
-results = asyncio.run(GoogleReverseSearch().search_query("golden retriever", num=10))
+g = GoogleReverseSearch()
+results = asyncio.run(g.search_query("golden retriever", num=10))
+matches = asyncio.run(g.search_image("photo.jpg", num=0))
 ```
 
 ---
@@ -160,7 +181,7 @@ google-reverse-image-api/
 │   ├── app.py          # Flask application + route definitions
 │   └── api_util.py     # Chrome launcher, result parser, GoogleReverseSearch, Celery task, CLI
 ├── tests/
-│   └── test_extract.py # Parser tests for the page and scroll response formats
+│   └── test_extract.py # Parser tests for the page, scroll and Lens formats
 └── requirements.txt
 ```
 
@@ -175,6 +196,16 @@ google-reverse-image-api/
 | `CDP_PORT`       | `9333`                            | Debugging port for the launched Chrome        |
 | `CHROME_PROFILE` | `~/.google-reverse-image-profile` | User data directory for the launched Chrome   |
 | `CHROME_PATH`    | auto-detected                     | Path to the Chrome executable                 |
+
+---
+
+## Limitations
+
+- **Reverse image search returns about 60 matches.** Scrolling the Lens page did not load more, and only the default results tab is read. Whether this is a Google cap or a scrolling gap has not been investigated.
+- **Text search stops where Google stops.** For the query "test" this was 400 results; `num=0` scrolls until three scrolls in a row add nothing.
+- **Some "full-size" URLs are thumbnails.** Lens matches can expose only a small image, for example 140x140.
+- **The browser closes when the search ends.** In `launch` mode the launched Chrome is shut down if no other search is using it. In `auto` mode only the opened tab is closed.
+- **The Flask upload route is untested.** The CLI and the Python class were run against live Google; `search-image` was not run end to end.
 
 ---
 

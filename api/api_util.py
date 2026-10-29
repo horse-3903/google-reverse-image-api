@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -26,14 +27,26 @@ RESULT_RE = re.compile(
     r'\[\d+,\\?"([\w-]+)\\?",\[\\?"(https://encrypted-tbn\d\.gstatic\.com.+?)\\?",(\d+),(\d+)\],'
     r'\[\\?"(https?://.+?)\\?",(\d+),(\d+)\]'
 )
+SOURCE_RE = re.compile(r'"2003":\[null,\\?"[\w-]+\\?",\\?"(https?://.+?)\\?",\\?"(.*?)\\?",')
 UNICODE_ESC = re.compile(r"\\+u([0-9a-fA-F]{4})")
+
+
+def unescape(s: str):
+    return UNICODE_ESC.sub(lambda m: chr(int(m.group(1), 16)), s)
 
 
 def extract(text: str):
     results = {}
-    for tbnid, _, _, _, url, height, width in RESULT_RE.findall(text):
-        url = UNICODE_ESC.sub(lambda m: chr(int(m.group(1), 16)), url)
-        results.setdefault(tbnid, {"url": url, "width": int(width), "height": int(height)})
+    for m in RESULT_RE.finditer(text):
+        tbnid, _, _, _, url, height, width = m.groups()
+        if tbnid in results:
+            continue
+        result = {"url": unescape(url), "width": int(width), "height": int(height)}
+        source = SOURCE_RE.search(text, m.end(), m.end() + 400)
+        if source:
+            result["page_url"] = unescape(source.group(1))
+            result["title"] = unescape(source.group(2))
+        results[tbnid] = result
     return list(results.values())
 
 
@@ -117,8 +130,9 @@ class GoogleReverseSearch:
             return ws_from_active_port()
         return self.endpoint
 
-    async def search_query(self, query: str, num: int = 0):
-        """Returns up to num results as {url, width, height}; num=0 scrolls until Google has no more."""
+    @contextlib.asynccontextmanager
+    async def session(self):
+        """Yields (page, results); results fills with every result Google sends to the page."""
         endpoint = await self.resolve_endpoint()
         results = {}
 
@@ -136,39 +150,59 @@ class GoogleReverseSearch:
             browser = await p.chromium.connect_over_cdp(endpoint)
             context = browser.contexts[0]
             blank = [pg for pg in context.pages if pg.url == "about:blank"]
-            reuse = self.endpoint == "launch" and bool(blank)
-            page = blank[0] if reuse else await context.new_page()
+            page = blank[0] if self.endpoint == "launch" and blank else await context.new_page()
             page.on("response", lambda r: asyncio.ensure_future(grab(r)))
 
             try:
-                await page.goto(SEARCH_URL)
-                search_bar = page.locator("textarea").first
-                await search_bar.fill(query)
-                await search_bar.press("Enter")
-                await page.wait_for_load_state("load")
-                await asyncio.sleep(1)
-
-                if "/sorry/" in page.url:
-                    raise RuntimeError("Google served a bot check, solve it in the Chrome window and retry")
-
-                stalled = 0
-                while (not num or len(results) < num) and stalled < 3:
-                    previous = len(results)
-                    await page.keyboard.press("End")
-                    for _ in range(10):
-                        await asyncio.sleep(0.5)
-                        if len(results) > previous:
-                            break
-                    stalled = stalled + 1 if len(results) == previous else 0
-
-                for r in extract(await page.content()):
-                    results.setdefault(r["url"], r)
+                yield page, results
             finally:
-                if not reuse:
+                others = [pg for pg in context.pages if pg != page]
+                if self.endpoint == "launch" and not others:
+                    with contextlib.suppress(Exception):
+                        await (await browser.new_browser_cdp_session()).send("Browser.close")
+                else:
                     await page.close()
+
+    async def collect(self, page, results: dict, num: int):
+        await page.wait_for_load_state("load")
+        await asyncio.sleep(1)
+
+        if "/sorry/" in page.url:
+            raise RuntimeError("Google served a bot check, solve it in the Chrome window and retry")
+
+        stalled = 0
+        while (not num or len(results) < num) and stalled < 3:
+            previous = len(results)
+            await page.keyboard.press("End")
+            for _ in range(10):
+                await asyncio.sleep(0.5)
+                if len(results) > previous:
+                    break
+            stalled = stalled + 1 if len(results) == previous else 0
+
+        for r in extract(await page.content()):
+            results.setdefault(r["url"], r)
 
         results = list(results.values())
         return results[:num] if num else results
+
+    async def search_query(self, query: str, num: int = 0):
+        """Text search. Returns up to num results as {url, width, height, page_url, title}; num=0 means all."""
+        async with self.session() as (page, results):
+            await page.goto(SEARCH_URL)
+            search_bar = page.locator("textarea").first
+            await search_bar.fill(query)
+            await search_bar.press("Enter")
+            return await self.collect(page, results, num)
+
+    async def search_image(self, image_path: str, num: int = 0):
+        """Reverse image search through Google Lens. Same result shape as search_query."""
+        async with self.session() as (page, results):
+            await page.goto(SEARCH_URL)
+            await page.locator("[aria-label='Search by image']").first.click()
+            await page.locator("input[name=encoded_image]").set_input_files(image_path)
+            await page.wait_for_url(re.compile(r"google\.com/search\?.*vsrid="))
+            return await self.collect(page, results, num)
 
 
 @celery.task
@@ -176,14 +210,26 @@ def google_reverse_search_task(query: str, num: int):
     return asyncio.run(GoogleReverseSearch().search_query(query=query, num=num))
 
 
+@celery.task
+def google_reverse_image_task(image_path: str, num: int):
+    try:
+        return asyncio.run(GoogleReverseSearch().search_image(image_path=image_path, num=num))
+    finally:
+        os.remove(image_path)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("query")
+    ap.add_argument("query", nargs="?", help="text query")
+    ap.add_argument("--image", help="reverse image search with this image file instead of a text query")
     ap.add_argument("--num", type=int, default=10, help="0 for every result Google will show")
     ap.add_argument("--out", help="write results to this JSON file")
     args = ap.parse_args()
+    if bool(args.query) == bool(args.image):
+        ap.error("give either a query or --image")
 
-    found = asyncio.run(GoogleReverseSearch().search_query(args.query, args.num))
+    g = GoogleReverseSearch()
+    found = asyncio.run(g.search_image(args.image, args.num) if args.image else g.search_query(args.query, args.num))
     if args.out:
         with open(args.out, "w") as f:
             json.dump(found, f, indent=2)

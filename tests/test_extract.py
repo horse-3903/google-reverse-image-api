@@ -14,6 +14,12 @@ SCROLL_RESPONSE = (
     r'[\"https://media.post.rvohealth.io/wp-content/uploads/2023/02/2715013-At-Home-Drug-Tests-732x549-Feature.jpg\",549,732],null,0]'
 )
 
+LENS_RECORD = (
+    r'["AwjjaumQNfrf2roP2oLwyQI59":[0,"5uY30m5LTnbwCM",["https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcRAwW3L_PyV_wWkyLTYl2xVgaKAS9JlVQMRqWaMFiC_FHZBlyJm",221,228],'
+    r'["https://static.wikia.nocookie.net/valorant/images/e/e6/Bind_minimap.png/revision/latest?cb=20260203205623",2048,2048],null,0,'
+    r'{"22":0,"2003":[null,"fVy21i1Ks6NUYM","https://valorant.fandom.com/wiki/Map:Bind","Map:Bind | Valorant Wiki | Fandom",null,null]}]'
+)
+
 
 class ExtractTest(unittest.TestCase):
     def test_main_page_format(self):
@@ -44,6 +50,13 @@ class ExtractTest(unittest.TestCase):
         results = extract(MAIN_PAGE + MAIN_PAGE + SCROLL_RESPONSE)
         self.assertEqual(len(results), 3)
         self.assertFalse(any("encrypted-tbn" in r["url"] for r in results))
+
+    def test_lens_record_includes_source_page(self):
+        result = extract(LENS_RECORD)[0]
+        self.assertEqual(result["url"], "https://static.wikia.nocookie.net/valorant/images/e/e6/Bind_minimap.png/revision/latest?cb=20260203205623")
+        self.assertEqual((result["width"], result["height"]), (2048, 2048))
+        self.assertEqual(result["page_url"], "https://valorant.fandom.com/wiki/Map:Bind")
+        self.assertEqual(result["title"], "Map:Bind | Valorant Wiki | Fandom")
 
     def test_no_results(self):
         self.assertEqual(extract("<html>Please enable JavaScript</html>"), [])
