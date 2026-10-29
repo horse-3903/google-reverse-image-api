@@ -19,11 +19,11 @@ Async Google reverse image search via Playwright, served as a REST API with Cele
 
 ## Features
 
-- **Headless browser scraping** — Playwright drives a real Chromium instance so no API key is needed
-- **Async search engine** — scrolls and paginates automatically to reach the requested result count
-- **Background task queue** — Celery + Redis decouple request handling from scraping latency
-- **Polling endpoint** — clients check task status and retrieve results when ready
-- **Local search utilities** — additional scripts for offline/local image search workflows
+- **Headless browser scraping**: Playwright drives a real Chromium instance so no API key is needed
+- **Async search engine**: scrolls and paginates automatically to reach the requested result count
+- **Background task queue**: Celery + Redis decouple request handling from scraping latency
+- **Polling endpoint**: clients check task status and retrieve results when ready
+- **Local search utilities**: additional scripts for offline/local image search workflows
 
 ## Tech Stack
 
@@ -132,4 +132,4 @@ google-reverse-image-api/
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+MIT: see [LICENSE](LICENSE)
