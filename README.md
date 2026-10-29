@@ -2,7 +2,7 @@
 
 # google-reverse-image-api
 
-Full-resolution Google Images URLs over Chrome remote debugging, served as a REST API with Celery task queuing
+Google Images scraper and REST API: original full-size image URLs and dimensions for any search, no API key, no clicking
 
 [![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/python)
@@ -15,7 +15,21 @@ Full-resolution Google Images URLs over Chrome remote debugging, served as a RES
 
 ## Overview
 
-**google-reverse-image-api** returns the original, full-size image URLs for a Google Images search, along with their pixel dimensions. Google embeds these URLs in the result data of the search page and its scroll responses, so the scraper reads them directly instead of clicking every thumbnail. A real Chrome is attached over the DevTools protocol because Google serves an empty page to plain HTTP clients.
+**google-reverse-image-api** is a Google Images scraper that returns the original, full-size image URLs for a text search, along with their pixel dimensions, as JSON. Google embeds these URLs in the result data of the search page and its scroll responses, so the scraper reads them directly instead of clicking every thumbnail. A real Chrome is attached over the DevTools protocol (CDP) because Google serves an empty page to plain HTTP clients.
+
+It searches Google Images by text query. It does not do upload-based reverse image search.
+
+---
+
+## Why This Approach
+
+| Approach | Cost per result | Limitation |
+|----------|-----------------|------------|
+| Click-based Selenium or Playwright scrapers | One click and wait per thumbnail | Slow, breaks when the viewer UI changes |
+| Plain `requests` or `curl` | Cheap | Google returns a JavaScript-required stub with no results |
+| **This project** | Parsed from data the page already loaded | Needs a local Chrome |
+
+Measured once on the query "test": 400 results with dimensions in about 30 seconds, including Chrome attach and scrolling.
 
 ---
 
@@ -161,6 +175,12 @@ google-reverse-image-api/
 | `CDP_PORT`       | `9333`                            | Debugging port for the launched Chrome        |
 | `CHROME_PROFILE` | `~/.google-reverse-image-profile` | User data directory for the launched Chrome   |
 | `CHROME_PATH`    | auto-detected                     | Path to the Chrome executable                 |
+
+---
+
+## Disclaimer
+
+Automated scraping of Google Search may violate Google's Terms of Service. Use this for research and personal projects, keep request volume low, and respect the copyright and licence of every image you download. The parser depends on an undocumented page format and can break without notice.
 
 ---
 
